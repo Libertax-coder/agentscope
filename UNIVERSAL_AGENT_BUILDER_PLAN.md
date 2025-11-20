@@ -350,20 +350,22 @@ Reflection.status → Routing Decision
 
 ### 4. Sub-Agent Layer
 
-**Sub-Agent 类型:**
+**核心三大 Sub-Agent:**
 
 #### 4.1 Code Agent
 
 ```python
 class CodeAgent(AgentBase):
-    """编程智能体"""
+    """代码交付智能体 - 负责所有编程任务"""
 
     tools = [
         'execute_python_code',
+        'execute_javascript_code',
         'write_code_file',
         'read_code_file',
         'install_package',
         'run_tests',
+        'generate_visualization',  # 数据可视化
     ]
 
     # 独立调用示例
@@ -374,81 +376,158 @@ class CodeAgent(AgentBase):
     # 交互式调用示例
     async def build_web_app(self, requirements: str,
                            shared_context: MasterContext) -> dict:
-        """构建网页，可访问共享 Context"""
+        """构建网页应用，可访问共享 Context"""
         # 可以读取 shared_context.artifacts_index
-        # 查看之前收集的信息
+        # 查看之前收集的信息、数据文件等
+        pass
+
+    async def implement_algorithm(self, spec: str,
+                                  shared_context: MasterContext) -> dict:
+        """实现算法，可能需要之前的研究资料"""
         pass
 ```
 
-#### 4.2 Browser Agent
+#### 4.2 Browser Use Agent
 
 ```python
-class BrowserAgent(AgentBase):
-    """浏览器自动化智能体"""
+class BrowserUseAgent(AgentBase):
+    """浏览器自动化智能体 - 详细浏览和信息提取"""
 
     tools = [
         'navigate_to_url',
         'click_element',
         'extract_text',
+        'extract_structured_data',
         'screenshot',
         'fill_form',
+        'scroll_page',
+        'wait_for_element',
     ]
 
-    async def collect_info(self, query: str) -> dict:
-        """收集信息，返回结构化数据"""
+    async def browse_and_extract(self, url: str, extraction_task: str) -> dict:
+        """浏览 URL 并提取信息"""
+        # 输入：URL（可能来自 web_search 工具）
+        # 输出：结构化数据或文本内容
+        pass
+
+    async def multi_page_research(self, urls: list[str],
+                                  shared_context: MasterContext) -> dict:
+        """多页面研究任务，交互式调用"""
+        # 访问多个页面，综合信息
+        # 可能需要根据之前的发现调整浏览策略
         pass
 ```
 
-#### 4.3 Research Agent
+#### 4.3 Report Agent
 
 ```python
-class ResearchAgent(AgentBase):
-    """深度研究智能体"""
+class ReportAgent(AgentBase):
+    """报告产出智能体 - 生成各类研究报告和文档"""
 
-    async def conduct_research(self, topic: str, depth: str) -> str:
-        """进行深度研究，生成报告"""
-        # 可能调用 Browser Agent、RAG、搜索 API 等
+    tools = [
+        'write_markdown',
+        'generate_pdf',
+        'create_presentation',
+        'format_document',
+        'add_references',
+    ]
+
+    async def generate_research_report(self,
+                                       topic: str,
+                                       shared_context: MasterContext) -> str:
+        """生成深度研究报告"""
+        # 读取 shared_context 中的：
+        # - Browser Use Agent 收集的信息
+        # - Code Agent 生成的数据分析结果
+        # - 之前沉淀的资料
+        # 输出：格式化的 Markdown/PDF 报告
         pass
+
+    async def create_technical_doc(self,
+                                   code_artifacts: list[str],
+                                   shared_context: MasterContext) -> str:
+        """创建技术文档"""
+        # 基于代码文件生成文档
+        pass
+```
+
+---
+
+**信息检索策略:**
+
+```python
+# Master Agent 的信息检索流程
+async def research_workflow(self, query: str):
+    """信息检索工作流"""
+
+    # Step 1: Web Search 获取相关 URL
+    search_results = await self.tools['web_search'](query)
+    # 返回：[{url, title, snippet}, ...]
+
+    # Step 2: Browser Use Agent 详细浏览
+    for result in search_results[:5]:  # 浏览前5个结果
+        detailed_info = await self.sub_agents['browser_use'].browse_and_extract(
+            url=result['url'],
+            extraction_task=f"Extract detailed information about {query}"
+        )
+        self._save_artifact(detailed_info)
+
+    # Step 3: Report Agent 整合报告
+    report = await self.sub_agents['report'].generate_research_report(
+        topic=query,
+        shared_context=self.context  # 包含所有浏览结果
+    )
+
+    return report
 ```
 
 ---
 
 ### 5. Docker Sandbox
 
-**每个 Session 独立沙盒:**
+**本地部署方案（单 Session 流畅运行）:**
 
 ```yaml
 Docker Container (Per Session):
   - Base Image: ubuntu:22.04
   - Python 3.11+ 运行环境
   - Node.js 18+ 运行环境
-  - Playwright (浏览器自动化)
-  - 文件系统挂载: /workspace
-  - 网络: 受限访问 (白名单)
+  - Playwright (浏览器自动化 - 用于 Browser Use Agent)
+  - 文件系统: 容器内部 /workspace (不使用远程对象存储)
+  - 网络: 允许外网访问 (用于 web search 和浏览)
   - 资源限制:
       - CPU: 2 cores
       - Memory: 4GB
-      - Disk: 10GB
-      - Timeout: 1 hour
+      - Disk: 10GB (临时存储，session 结束可选择保留或清理)
+      - Timeout: 2 hours
+  - 部署方式: 本地 Docker，后续考虑工程化扩展
 ```
 
-**文件系统结构:**
+**容器内文件系统结构:**
 
 ```
-/workspace/
+/workspace/  (容器内部，非挂载)
 ├── session_<id>/
-│   ├── artifacts/
-│   │   ├── documents/  # Markdown, PDF 等
-│   │   ├── code/       # Python, JS, CSS 等
-│   │   ├── media/      # 图片、音频、视频
-│   │   └── data/       # JSON, CSV 等数据文件
-│   ├── context/
-│   │   ├── plan.json
-│   │   ├── decision_path.json
-│   │   └── artifacts_index.json
+│   ├── artifacts/  (Sub-Agent 产出的文件)
+│   │   ├── documents/  # Markdown, PDF 等 (Report Agent 产出)
+│   │   ├── code/       # Python, JS, CSS 等 (Code Agent 产出)
+│   │   ├── media/      # 图片、音频、视频 (Code Agent 可视化等)
+│   │   └── data/       # JSON, CSV 等数据文件 (Browser Use Agent 提取的数据)
+│   ├── context/  (Master Agent 状态管理)
+│   │   ├── plan.json              # 当前计划
+│   │   ├── decision_path.json     # 决策路径历史
+│   │   └── artifacts_index.json   # 文件索引
+│   ├── browser/  (Browser Use Agent 工作目录)
+│   │   ├── screenshots/
+│   │   └── downloads/
 │   └── logs/
 │       └── session.log
 ```
+
+**工程化扩展预留:**
+- 未来可考虑容器池、资源调度
+- 可选的持久化存储方案
+- 分布式部署支持
 
 ---
 
@@ -621,27 +700,30 @@ elif reflection.routing == 'planner':
 
 ### Phase 5: Sub-Agent 独立调用 (5-6天)
 
-**目标:** 实现 Sub-Agent 独立调用模式
+**目标:** 实现三大 Sub-Agent 的独立调用模式
 
 **任务:**
-- [ ] 实现 Code Agent (基础版)
-- [ ] 实现 Browser Agent (基础版)
+- [ ] 实现 Code Agent (基础版 - 代码执行、文件操作)
+- [ ] 实现 Browser Use Agent (基础版 - 浏览、提取信息)
+- [ ] 实现 Report Agent (基础版 - Markdown 生成)
 - [ ] 实现独立调用接口
 - [ ] 集成到 Master Agent
 - [ ] 编写测试
 
 **核心文件:**
 - `src/agents/sub_agents/code_agent.py`
-- `src/agents/sub_agents/browser_agent.py`
+- `src/agents/sub_agents/browser_use_agent.py`
+- `src/agents/sub_agents/report_agent.py`
 
 **验收标准:**
 - Code Agent 可以执行代码、生成图表
-- Browser Agent 可以浏览网页、提取信息
+- Browser Use Agent 可以浏览网页、提取信息
+- Report Agent 可以生成 Markdown 报告
 - Master Agent 可以正确调用并获取结果
 
 **示例任务:**
 ```python
-# Master Agent 决策
+# 示例 1: Code Agent 生成图表
 action = {
     'type': 'sub_agent_independent',
     'agent_name': 'code_agent',
@@ -650,33 +732,45 @@ action = {
         'data': {'A': 10, 'B': 20, 'C': 15}
     }
 }
-
-# 执行
 result = await master._call_sub_agent_independent(action)
 # result: {'chart_path': '/workspace/session_xxx/artifacts/media/chart.png'}
+
+# 示例 2: Browser Use Agent 浏览网页
+action = {
+    'type': 'sub_agent_independent',
+    'agent_name': 'browser_use_agent',
+    'input': {
+        'url': 'https://example.com',
+        'extraction_task': 'Extract main content'
+    }
+}
+result = await master._call_sub_agent_independent(action)
+# result: {'content': '...', 'data_path': '/workspace/session_xxx/artifacts/data/page_data.json'}
 ```
 
 ---
 
 ### Phase 6: Sub-Agent 交互式调用 (5-6天)
 
-**目标:** 实现 Sub-Agent 交互式调用模式（共享 Context）
+**目标:** 实现三大 Sub-Agent 的交互式调用模式（共享 Context）
 
 **任务:**
 - [ ] 设计 Context 共享机制
 - [ ] 实现 Sub-Agent Context 访问接口
 - [ ] 实现 Artifacts 同步机制
-- [ ] 扩展 Code Agent 支持交互式调用
+- [ ] 扩展三个 Sub-Agent 支持交互式调用
+- [ ] 实现典型工作流（Web Search + Browser Use + Report）
 - [ ] 编写复杂场景测试
 
 **验收标准:**
 - Sub-Agent 可以访问 Master Context
 - Sub-Agent 可以读取之前的 Artifacts
 - Master 和 Sub-Agent 的 Artifacts 正确同步
+- 完整的信息检索工作流可以运行
 
 **示例任务:**
 ```python
-# Master Agent 决策（交互式）
+# 示例 1: Code Agent 交互式调用
 action = {
     'type': 'sub_agent_interactive',
     'agent_name': 'code_agent',
@@ -685,12 +779,32 @@ action = {
         'requirements': '基于之前收集的天气数据构建展示网页'
     }
 }
-
 # Code Agent 可以访问:
 # - shared_context.artifacts_index['weather_data.json']
 # - shared_context.decision_history (了解数据来源)
-
 result = await master._call_sub_agent_interactive(action)
+
+# 示例 2: 完整的研究工作流
+# Step 1: Web Search
+search_results = await master.tools['web_search']('AI Agent 最新进展')
+
+# Step 2: Browser Use Agent 详细浏览（交互式）
+for url in search_results[:5]:
+    action = {
+        'type': 'sub_agent_interactive',
+        'agent_name': 'browser_use_agent',
+        'input': {'url': url, 'task': 'extract_research_insights'}
+    }
+    await master._call_sub_agent_interactive(action)
+
+# Step 3: Report Agent 整合报告（交互式）
+action = {
+    'type': 'sub_agent_interactive',
+    'agent_name': 'report_agent',
+    'input': {'topic': 'AI Agent 最新进展综述'}
+}
+# Report Agent 访问所有之前收集的数据
+report = await master._call_sub_agent_interactive(action)
 ```
 
 ---
@@ -781,23 +895,26 @@ WORKDIR /workspace
 
 ---
 
-### Phase 9: 高级功能 (6-8天)
+### Phase 9: 高级功能和优化 (6-8天)
 
-**目标:** 实现高级特性
+**目标:** 实现高级特性和性能优化
 
 **任务:**
-- [ ] 实现 Research Agent
-- [ ] 实现 Writer Agent（生成报告）
-- [ ] 实现并行工具调用
-- [ ] 实现长期记忆（跨 Session）
-- [ ] 实现 RAG 知识库集成
-- [ ] 性能优化
+- [ ] 增强三大 Sub-Agent 功能
+  - Code Agent: 测试自动生成、代码审查
+  - Browser Use Agent: 复杂交互、表单填写
+  - Report Agent: PDF 生成、多格式导出
+- [ ] 实现并行工具调用（Master Agent 同时调用多个工具）
+- [ ] 实现长期记忆（跨 Session 的知识积累）
+- [ ] 可选：RAG 知识库集成（为 Report Agent 提供参考资料）
+- [ ] 性能优化和稳定性改进
 
-**可选功能:**
+**可选功能（工程化扩展）:**
 - 多模态输入支持（图片、语音）
 - 实时流式输出
-- Web UI
-- 分布式部署
+- Web UI 界面
+- 分布式部署支持
+- Session 状态持久化到数据库
 
 ---
 
